@@ -9,13 +9,17 @@
 	<a href="index.html">⇐ index</a>
 	<h1>PROCESS AND THREADS ON LINUX KERNEL</h1>
 	<hr>
+
+	<h2>Knowledge required</h2>
+	<a href="https://en.wikipedia.org/wiki/System_call">System call</a><br>
+	<a href="https://dev.to/simoes/hello-world-linux-kernel-module-1m6h">The basic of Linux Kernel Module</a><br>
+	<a href="https://en.wikipedia.org/wiki/Interrupt">Interrupts</a>
 	
 	<h2> Understand the process and interrupts context</h2>
 	The proccess in kernels normally have a some levels, from least priority to most priority, then the most priority (0) are execute first than another level (1,2,3...).<br>
 	The modern processors execute code at different levels of privilege, for example, the x86 offer four levels of privilege, with ring 0 being the most privileged and 3 bring the least. <br>
-	Realistically though, modern operating systems have only two levels of privilege (a privileged level and an unprivileged). The unprivileged level is a process that the user send a syscall for kernel execute a process, and the privileged process is a process that is created by a interrupts requests.<br><br>
-
-	The proccess EVERY have a one thread or more.<br>
+	Realistically though, modern operating systems have only two levels of privilege (a privileged level and an unprivileged). The unprivileged level is a process that the user send a syscall for kernel execute a process, and the privileged process is a process that is created by a interrupts requests.<br>
+	The proccess EVERY have a one thread or more. If one process exists, then the one thread or more exists. The main thread is usually the main() function. A process that isn't multi-thread, have only one thread: The T0 thread, or main thread.<br>
 
 	Well... I explanit this with more details.<br><br>
 
@@ -62,11 +66,11 @@
 
 	Well, I will put a bash script for download in <a href="countem.sh" download>this link!</a><br>
 	This script I get from the <a href="https://www.amazon.com/Linux-Kernel-Development-Cookbook-programming/dp/178995343X">Linux Kernel Programming book by Kaiwan N. Billimoria.</a>, which this text was inspired by.<br> <br>
-	I run, this bash scripts, and this is my resunt in my native Arch Linux x86_64<br>
+	I run, this bash scripts, and this is my result in my native Arch Linux x86_64<br>
 	<img src="result-of-countem.png"/><br><br>
 
-	The code of kernel have a data struct to repsentation a thread. When the kernel is created, the metadata of the thread is storage in this struct: task_struct, that is find int include/linux/sched.h.<br> 
-	Firstly, recall that the task struct is essentially the 'root' data structure of the process of thread, then it holds all attributes of the task. Then, this is a large data struct. How is saing by Linux Kernel Programming book, the x86_64 for 6.1 kernel have a 9,728 bytes. <br>
+	The code of kernel have a data struct to repsentation a thread. When the kernel is created, the metadata of the thread is storage in this struct: task_struct. This struct can find in include/linux/sched.h.<br> 
+	Firstly, recall that the task struct is essentially the 'root' data structure of the process of thread, then it holds all attributes of the task. This is a large data struct. How is saing by Linux Kernel Programming book, the x86_64 for 6.1 kernel have a 9,728 bytes. <br>
 	We will see any fields, and I put a brief explanation about this. Don't forget to go to the <a href="https://github.com/torvalds/linux/blob/9b62e02e63363f5678d5598ee7372064301587f7/include/linux/sched.h#L748">sched.h</a> file and see the task_struct struct.<br><br>
 
 	<strong> struct thread_info thread_info; </strong> //Important flags and status bits <br>
@@ -81,7 +85,7 @@
 
 	<h2> ACCESSING THE TASK STRUCT </h2>
 	When I run the ./countem.sh script, I found the total of 1013 threads alive on my system. This implies that there will be a total of 1013 task structure objects in the kernel memory.<br>
-	They need to be organized in a way that the kernel can easily access them as and when required. Thus, all the task structure objects in kernel memory are chained up on a circular doubly linked list called the <strong> task list</strong>.<br>
+	They need to be organized in a way that the kernel can easily access them as and when required. Thus, all the task structure objects in kernel memory are chained up on a circular doubly linked list called<strong> task list</strong>.<br>
 	But, how I can find the current task struct that is running on CPU? This is a  non-trivial task. The kernel developers have evolved a way to guarantee you can find the particular task structre representing the thread currently running the kernel code. It's achieved via a macro called <i>current</i>. <br>
 	The implementation of the current macro is very architecture specific. For example, on some RISC architecure with many generical-purpose registers, a register is dedicated to holding the value of current. Including the linux/sched.h header is required to include the definition of current in your code:<br>
 	<pre>
@@ -93,9 +97,9 @@ current->pid, current->comm
 	1) Process context <br>
 	2) Interrupt context <br><br>
 
-	The kernel code runs the process in interrupt context at any given point in time. But, why is important to be able to determine the context kernel or driver code's running in? Well, becaude the process in interrupt context don't can 'sleep'.<br>
-	A task is sleeping when have a switch context, for example: Think in one task running in a specific CPU in process context. If this CPU received a interrupt request, the task previous task going to 'sleep' and the process in interrupt context is execute where the previous task wait the process interrupt context finish your task.<br>
-	The process in interrupt context don't sleep, because this can finish your task without another interrupts.<br>
+	The kernel code runs the process in interrupt context at any given point in time. But, why is important to be able to determine the context kernel or driver code's running in? Well, because the process in interrupt context don't can 'sleep'.<br>
+	A task is sleeping when have a switch context, for example: Think in one task running in a specific CPU in process context. If this CPU received a interrupt request, the previous task going to 'sleep' and the process in interrupt context is execute where the previous task wait the process interrupt context finish your task.<br>
+	The process in interrupt context don't sleep, because this should finish your task without another interrupts.<br>
 	Now that we know why, here's how you can easily determine why the context your kernel code is currently executing in:
 	<pre>
 #include &ltlinux/preempt.h&gt
@@ -105,7 +109,7 @@ in_task()
 	
 	<h2> Working with the task structure via current </h2>
 	Now, we write a simple kernel module to show any information about the context that this process is running. <br>
-	We make the show_ctx() function that use the current macro to access a few members of the task structure and display their values. This functions is invoked from both init as well as the cleanup method.<br>
+	We make the show_ctx() function that use the current macro to access a few members of the task structure and display their values. This functions is invoked from both init as well as the exit method.<br>
 
 	<pre>
 #include &ltlinux/init.h&gt
@@ -180,7 +184,7 @@ module_exit(current_exit);
 	You can easily iteract from each task running in system using a macro that is provided by <i>include/linux/sched/signal.h</i> header file. <br>
 	Now, we will write a kernel module to iterate over the kernel task list. <br><br>
 	
-	Well, the kernel provide for we a conveniente rountine. The <i>for_each_process</i> macro. This macro allow iteract for each process in task list:
+	Well, the kernel provide for we a conveniente rountine. The <i>for_each_process</i> macro. This macro allow iterate for each process in task list:
 	<pre>
 /// include/linux/sched/signal.h
 #define for_each_process(p) \
