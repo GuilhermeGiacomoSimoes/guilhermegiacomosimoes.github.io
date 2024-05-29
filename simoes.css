@@ -33,3 +33,11 @@ body {
 	font-size: 15px;
 	font-style: italic;
 }
+
+.text-center-align-right {
+	height: 100%;
+	margin: 0;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+}
