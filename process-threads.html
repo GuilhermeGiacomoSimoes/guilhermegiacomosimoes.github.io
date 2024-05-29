@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GUILHERME GIACOMO SIMOES</title>
+    <link rel="stylesheet" href="simoes.css">
+</head>
+<body>
+	<h1>PROCESS AND THREADS</h1>
+	<hr>
+	
+	<h2> Understand the process and interrupts context</h2>
+	The proccess in kernels normally have a some levels, from least priority to most priority, then the most priority (0) are execute first than another level (1,2,3...).<br>
+	The modern processors execute code at different levels of privilege, for example, the x86 offer four levels of privilege, with ring 0 being the most privileged and 3 bring the least. <br>
+	Realistically though, modern operating systems have only two levels of privilege (a privileged level and an unprivileged). The unprivileged level is a process that the user send a syscall for kernel execute a process, and the privileged process is a process that is created by a interrupts requests.<br><br>
+
+	The proccess EVERY have a one thread or more.<br>
+
+	Well... I explanit this with more details.<br><br>
+
+	When the user land issuer a system call, it switches to kernel mode and execute the kernel code.<br>
+	Yes, there is no kernel or kernel thread executing code on its behalf, insteed, the thread issuing the system call, switch to kernel mode and itself executes kernel code. Think about it, the kernel every is executed  within the context of a user space process or thread - we call this the <strong>proccess context</strong>. A significant portion of the kernel execute by this way, including a large portion of the code of device drivers. <br>
+
+	Well, how can kernel code execute? When a hardware interrupt fires, the CPU control unit stop the current task, save the current state of task and immediately run the code of the interrupt handler. Now we say that the kernel code being executed in <strong> interrupt context </strong> <br><br>
+
+	So, every kernel code is executed in one of two contexts: <br>
+	<strong>Process context</strong> - When the user land thread make a system call to kernel. The kernel run the task that the thread need with kernel privileges.<br>
+	<strong>Interrupt context</strong> - When the hardware issue a interrupt request. The CPU stop the current task, save the current context and execute the interrupt handler.<br><br>
+
+	The image below, show us the conceptual view:<br>
+	<img src="process-threads.svg"/> 
+	<br><br>
+
+	<h2> The VAS process </h2>
+	All addressable memory of the process is a BOX. This "box" then is called VAS (Virtual Address Space). <br>
+	A Important 'rule' is: LOOKING OUTSIDE THE BOX IS DISALLOWED.<br><br>
+	<strong>Features:</strong><br>
+	* Isolation: each process has your VAS, then the process has a isolation from another process.<br>
+	* Safe: How look for outside the box is disallowed, we don't see the data of another process.<br>
+	* Performance: How the VAS is bit of memory, when the process need found any data, the memory that the process need traverse is smaller than the total memory size.<br><br>
+
+	The process VAS is split into homogeneous memory regions called segments or mapping. Every linux process has at least the following mapping or segment:<br>
+	<strong>Code segment</strong> - have a executable code of program. In this memory is storage the binary of program.<br>
+	<strong>Data segment</strong> - have a value of static and global data variable. This segment is split into three distinct segments:<br>
+	<strong>__Initialized data segment</strong> - The pre-initialized global/static variables are storage here. <br>
+	<strong>__Unitialized data segment</strong> - The uninitialized global/static variables are storage here.<br>
+	<strong>__Heap segment</strong> - The memory for allocation and freeing are storage here. But this is also not entirely true, because, the memory allocation that is bigger than 128KB get their memory from a separate 'mapping' in the VAS process.<br>
+	<strong>Libraries</strong> - All libraris that a process dynamically links into are mapped into the process VAS here.<br>
+	<strong>Stack</strong> - A region of memory that uses the stack for to implement a high-level languages function-calling mechanism, and, in effect, holds the thread's execution context. Every time that the function is called, one region of this segment is allocated. In this segment is storage the local variables that is include in high-level function context, your address to call this function and your value return propagation.<br><br>
+
+	The image below, show us the conceptual view: <br>
+	<img src="process-vas.svg"/> <br><br>
+
+	<h2> Organization of process and threads </h2>
+	In UNIX like operating systems, everyting is a process, if it's not a process, it's a file. <br>
+	The threads share all process resources, including the user VAS (except for the stack), open files, signal dispositions, paging tables and so on. <br> 
+	The next key point is: we require one stack per thread per privilege level supported by the CPU.<br>
+	On modern operating systems, such as Linux, we support two CPU privilege levels:<br>
+	1) User mode (unprivileged): This stack is in play when the thread executes user-mode code paths.<br>
+	2) Kernel mode (privileged): This stack is in play when the thread switches to kernel mode (via system call) and executes kernel code patths.<br><br>
+
+	Well, I will put a bash script for download in <a href="countem.sh" download>this link!</a><br>
+	This script I get from the <a href="https://www.amazon.com/Linux-Kernel-Development-Cookbook-programming/dp/178995343X">Linux Kernel Programming book by Kaiwan N. Billimoria.</a>, which this text was inspired by.<br> <br>
+	I run, this bash scripts, and this is my resunt in my native Arch Linux x86_64<br>
+	<img src="result-of-countem.png"/><br><br>
+
+	The code of kernel have a data struct to repsentation a thread. When the kernel is created, the metadata of the thread is storage in this struct: task_struct, that is find int include/linux/sched.h.<br> 
+	Firstly, recall that the task struct is essentially the 'root' data structure of the process of thread, then it holds all attributes of the task. Then, this is a large data struct. How is saing by Linux Kernel Programming book, the x86_64 for 6.1 kernel have a 9,728 bytes. <br>
+	We will see any fields, and I put a brief explanation about this. Don't forget to go to the <a href="https://github.com/torvalds/linux/blob/9b62e02e63363f5678d5598ee7372064301587f7/include/linux/sched.h#L748">sched.h</a> file and see the task_struct struct.<br><br>
+
+	<strong> struct thread_info thread_info; </strong> //Important flags and status bits <br>
+	<strong> void *stack; </strong> //The location of the kernel-mode stack <br>
+	<strong> struct mm_struct *mm; </strong> //memory management info <br>
+	<strong> pid_t pid; </strong> //task PID and TGID values <br>
+	<strong> char comm[TASK_COMM_LEN]; </strong> //task name <br>
+	<strong> struct files_struct *files; </strong> //ptr to the 'open files' ds <br>
+	<strong> struct thread_struct thread; </strong> //task hardware context detail <br><br>
+
+	Okay, now you have a better idea of the task struct and your member, how do you can access it and varios members?? <br> <br>
+
+	<h2> ACCESSING THE TASK STRUCT </h2>
+	When I run the ./countem.sh script, I found the total of 1013 threads alive on my system. This implies that there will be a total of 1013 task structure objects in the kernel memory.<br>
+	They need to be organized in a way that the kernel can easily access them as and when required. Thus, all the task structure objects in kernel memory are chained up on a circular doubly linked list called the <strong> task list</strong>.<br>
+	But, how I can find the current task struct that is running on CPU? This is a  non-trivial task. The kernel developers have evolved a way to guarantee you can find the particular task structre representing the thread currently running the kernel code. It's achieved via a macro called <i>current</i>. <br>
+	The implementation of the current macro is very architecture specific. For example, on some RISC architecure with many generical-purpose registers, a register is dedicated to holding the value of current. Including the linux/sched.h header is required to include the definition of current in your code:<br>
+	<pre>
+#include &ltlinux/sched.h&gt
+current->pid, current->comm
+	</pre><br><br>
+
+	How we see before, the kernel code execute in two contexts:<br>
+	1) Process context <br>
+	2) Interrupt context <br><br>
+
+	The kernel code runs the process in interrupt context at any given point in time. But, why is important to be able to determine the context kernel or driver code's running in? Well, becaude the process in interrupt context don't can 'sleep'.<br>
+	A task is sleeping when have a switch context, for example: Think in one task running in a specific CPU in process context. If this CPU received a interrupt request, the task previous task going to 'sleep' and the process in interrupt context is execute where the previous task wait the process interrupt context finish your task.<br>
+	The process in interrupt context don't sleep, because this can finish your task without another interrupts.<br>
+	Now that we know why, here's how you can easily determine why the context your kernel code is currently executing in:
+	<pre>
+#include &ltlinux/preempt.h&gt
+in_task()
+	</pre>
+	It  return a boolean: True if your code is running in process context, where it's - usually - safe to sleep; returning False implies you are in some kind of interrupt context where it is never safe to sleep.<br><br>
+	
+	<h2> Working with the task structure via current </h2>
+	Now, we write a simple kernel module to show any information about the context that this process is running. <br>
+	We make the show_ctx() function that use the current macro to access a few members of the task structure and display their values. This functions is invoked from both init as well as the cleanup method.<br>
+
+	<pre>
+#include &ltlinux/init.h&gt
+#include &ltlinux/module.h&gt
+#include &ltlinux/kernel.h&gt
+#include &ltlinux/sched.h&gt ///current()
+#include &ltlinux/preempt.h&gt ///in_task()
+#include &ltlinux/cred.h&gt ///current_{e}{u,g}id()
+#include &ltlinux/uidgid.h&gt ///{from,make}_kuid()
+
+#define MOD_NAME "process"
+
+MODULE_AUTHOR("Guilherme Giacomo Simoes");
+MODULE_DESCRIPTION("The code for get process information");
+MODULE_LICENSE("Dual MIT/GPL");
+
+static void show_ctx(char *nm) 
+{
+	unsigned const int uuid = from_kuid(&init_user_ns, current_uid());
+	unsigned const int euid = from_kuid(&init_user_ns, current_euid());
+
+	pr_info("\n");
+	if (in_task()) {
+		pr_info("%s: in process context ::\n"
+				"PID : %6d\n"
+				"TGID %6d\n"
+				"UID %6u\n"
+				"EUID %6u (%s root)\n"
+				"state :%c\n"
+				"name %s\n"
+				"current (ptr to our process context's task_struct) :\n"
+				"				0x%pK (0x%px)\n"
+				"stack start : 	0x%pK (0x%pX)\n", 
+				current-&gtcomm, 
+				task_pid_nr(current), 
+				task_tgid_nr(current),
+				uuid, 
+				euid, 
+				(!euid ? "have" :"don't have"),
+				task_state_to_char(current),
+				current-&gtcomm, 
+				current, 
+				current,
+				current-&gtstack, 
+				current-&gtstack);
+	}
+	else {
+		pr_alert("%s: in interrupt context [should not happen here!]\n", nm);
+	}
+}
+
+static int __init current_init(void)
+{
+	pr_info("%s: inserted\n", MOD_NAME);
+	pr_info(" sizeof(struct task_struct) = %zd\n", sizeof(struct task_struct));
+	show_ctx(MOD_NAME);
+	return 0;
+}
+
+static void __exit current_exit(void)
+{
+	show_ctx(MOD_NAME);
+	pr_info("%s: removed\n", MOD_NAME);
+}
+
+module_init(current_init);
+module_exit(current_exit);
+	</pre>
+
+	<br>
+	<h2> Itegrating over the kernel's task lists </h2>
+	You can easily iteract from each task running in system using a macro that is provided by <i>include/linux/sched/signal.h</i> header file. <br>
+	Now, we will write a kernel module to iterate over the kernel task list. <br><br>
+	
+	Well, the kernel provide for we a conveniente rountine. The <i>for_each_process</i> macro. This macro allow iteract for each process in task list:
+	<pre>
+/// include/linux/sched/signal.h
+#define for_each_process(p) \
+	for(p = &init_task ; (p = next_task(p)) != &init_task ; )
+	</pre>
+	Note that the <i>for_each_process()</i> macro is designed to only iterate for the T0 thread (the main thread running in process) and not any another 'childs' threads.<br>
+	Before we write our kernel module for interate for each process, think about a thing: The process is a global task structure of course. This implies that we should hold a lock when we work with the process. Even if only read. For this, we can use the functions <i>rcu_read_lock()</i> and <i>rcu_read_unlock()</i><br>
+	Let's write a small code to iterate for each process:
+	<pre>
+#include &ltlinux/init.h&gt
+#include &ltlinux/module.h&gt
+#include &ltlinux/kernel.h&gt
+#include &ltlinux/sched.h&gt
+
+#include &ltlinux/sched/signal.h&gt
+
+#include &ltlinux/fs.h&gt
+#include &ltlinux/slab.h&gt
+#include &ltlinux/uaccess.h&gt
+#include &ltlinux/kallsyms.h&gt
+
+#define MOD_NAME "process-iterate"
+
+MODULE_AUTHOR("Guilherme Giacomo Simoes");
+MODULE_DESCRIPTION("Small module to show the process iterate");
+MODULE_LICENSE("GPL");
+
+static int show_process(void)
+{
+	const int max_len = 128;
+	char tmp[max_len];
+	int numread = 0, n = 0, total = 0;
+	char header[] = "      Name      |  TGID  |   PID  |  RUID |   EUID";
+
+	pr_info("%s\n", &header[0]);
+
+	rcu_read_lock();
+
+	struct task_struct *p;
+	for_each_process(p) {
+		memset(tmp,0, 128);
+		n = snprintf(tmp, 128, "%-16s|%8d|%8d|%7u|%7u\n", p-&gtcomm, p-&gttgid, p-&gtpid,
+				__kuid_val(p-&gtcred-&gtuid), __kuid_val(p-&gtcred-&gteuid)
+				);
+
+		numread += n;
+		pr_info("%s", tmp);
+
+		cond_resched();
+		total++;
+	}
+
+	rcu_read_unlock();
+
+	return total;
+}
+
+static int __init process_interate_init(void) 
+{
+	int total;
+
+	pr_info("%s: inserted\n", MOD_NAME);
+	total = show_process();
+	pr_info("%s: total of processes on system: %d\n", MOD_NAME, total);
+
+	return 0;
+}
+
+static void __exit process_interate_exit(void)
+{
+	pr_info("%s: removed\n", MOD_NAME);
+}
+
+module_init(process_interate_init);
+module_exit(process_interate_exit);
+	</pre>
+
+	After insert this module, my output of dmesg is:<br>
+	<img src="dmesg-iterate-process.png"/><br><br>
+
+	<h2>How differentiating between the process and thread</h2>
+	Well, do you can ask: If the threads and process use a same task_struct and your unique key is the PID (Process IDentifier), how I can differentating between the process and threads if both have the same PID?<br>
+	Thus, the task_struct have the TGID (Thread Group ID). If your thread is the main thread, then the TGID of thread is equal the PID of process. But if not, then the TGID is differente, but the PID stays the same for all thread of process.<br><br><br>
+
+	<h1>Sources</h1>
+	<a href="https://www.amazon.com/Linux-Kernel-Development-Cookbook-programming/dp/178995343X">Linux Kernel Programming book by Kaiwan N. Billimoria.</a> <br><br>
+
+</body>
+</html>
