@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GUILHERME GIACOMO SIMOES</title>
+    <link rel="stylesheet" href="simoes.css">
+</head>
+<body>
+	<a href="index.html">⇐ index</a>
+	<h1>LINUX KERNEL ARCHITECTURE</h1>
+	<hr>
+
+	<h2>About Linux Kernel </h2>
+	The Linux kernel is the more knowing Kernel of the world. 
+	This kernel is started write by Linus Torvalds in 1991 in your university in Helsinki
+
+	<h2>What is Kernel</h2>
+	The kernel is a part of operating systems that handle the hardware. The primary memory, second memory, CPU and device drivers are manipulated by kernel. <br>
+	A operation systems it's jumble of several things, the kernel is one this things. The another things are a bootloader, a interface to user communicate, a package manager among others.<br>
+	The operating system have two "lands": The user land and kernel land. The user land is a place where the user manipulate the things. <br> 
+	For user land communicate with kernel, this make a called systemcalls. Ther kernel have a APIs availabel for user land communicate with this. <br>
+	If we write a simple helloworld.c :
+	<pre>
+#include &ltstdio.h&gt
+int main() {
+	printf("hello world");
+}
+	</pre>
+	And compile and run this:
+	<pre>
+$ clang helloworld.c -o a.out
+$ ./a.out
+	</pre>
+	This work on user and kernel land because, the main function need create a process on CPU, then this make a systemcalls called fork(). The fork is a function that clone a proccess and create another proccess. Then, the proccess that was will run the executable binary on user land, will do a systemcall for the kernel. The kernel will create a process on CPU and run this. <br>
+	Anothers systemcalls can be do, but this is not own propurse here. <br>
+	Well, the kernel handle the scheduling proccess on CPU. <br><br>
+
+	If we connect a USB mouse in own computer, the kernel will run the hotplug subsystem. The hotplug is a system for call the driver that is responsible for this device where the device is connected. <br>
+	The USB hotplug use a queue of drivers, and where the found the drivers from device this run the driver code. <br>
+	The <a href="https://github.com/torvalds/linux/blob/master/drivers/usb/core/usb.c">usb.c</a> is a file that handle the usb hotplug.<br><br>
+
+	Well, I think that now we has a mind of what is a kernel <br><br>
+
+	<h2>Architecture overview</h2>
+	<h3>Hardware-independent code and hardware-dependent code</h3>
+	The kernel is split in two things: The hardware-dependent code, and hardware-independent code. In the kernel have some things that the funcionality don't dependent of hardware. Like a USB core that is mentionated above. <br>
+	The hardware-dependent code, can be a driver, CPU Architecture dependent, or another think that is different for differents hardwares. For example:
+	Where the kernel is started, one the first thing that is loaded is a interrupts regions on memory. But differents CPU architecture can has a differents commands for this. <br>
+	For example, for the x86 architecture the command is:
+	<pre>
+lidt [memory_addres]
+	</pre>
+	and for the risc-v architecture the command is:
+	<pre>
+csrw mtvec, a0
+	</pre>
+
+	Then what command the kernel initialization should run for loading the interrupts descriptor tables? Well, the kernel initialization don't know what is the CPU architecture that he is run. Because the kernel initialozation is hardware-independent. Load interrupts memory address is a thing that should is do , independent of what the CPU architecture is run the kernel. <br>
+	Well, the kernel "domain", don't know what is the CPU architecture, becuase he is isolated from the "extern word". Like this image:<br><br>
+	<img src="kernel-isolation.svg"/>
+	<br><br>
+	The kernel domain don't know what this two function he should call... <br>
+	Well, the programmers of kernel solved this problemn was create a interfaces. The interface is a header file that have the signed functions for a implementation. Then the domain don't know the x86 or risc-v command for load the interrupts, but he know the interface that do this. Then the kernel call the interface:<br><br>
+	<img src="kernel-isolation-2.svg"/>
+	<br><br>
+	Then you can ask for me: But how the interface know what she should load??? <br>
+	Well, this is solved in compilation time. Imagine that you compile the kernel for x86 architecture, and in the kernel have two files: x86-load-int.c and riscv-load-int.c, both implement the function load_idt(). Where you compile, you say for compiler your architecture, and the compiler will compile the x86-load-int.c or riscv-load-int.c. You understand? Well, we will make some codes...<br><br>
+
+	We will create a interface header file load-int-interface.h:	
+	<pre>
+#ifndef __LOAD_INT_INTERFACE_H__
+#define __LOAD_INT_INTERFACE_H__
+
+void load_idt();
+
+#endif
+	</pre>
+
+	86-load-int.c:
+	<pre>
+#include &ltstdio.h&gt
+#include "load-int-interface.h"
+
+void load_idt() 
+{
+	printf("load x86 interrupts");
+}
+	</pre>
+	<br>
+	Then, we will create the riscv-load-int.c:
+	<pre>
+#include &ltstdio.h&gt
+#include "load-int-interface.h"
+
+void load_idt() 
+{
+	printf("load riscv interrupts");
+}
+	</pre>
+	<br>
+	main.c:
+	<pre>
+#include "load-int-interface.h"
+
+int main() {
+	load_idt();
+	return 0;
+}
+	</pre>
+	<br>
+	<br>
+
+	realize that the main.c don't know what the file (x86-load-int.c or riscv-load-int.c) will be run yet. The main.c only know the interface for this. <br><br>
+
+	Now we will create own Makefile:
+	<pre>
+CC ?= clang
+arch ?= x86
+
+ifeq ($(arch),x86)
+INT_FILE = x86-load-int.c
+endif
+
+ifeq ($(arch),riscv)
+INT_FILE = riscv-load-int.c
+endif
+
+all:
+	CC main.c ${INT_FILE} -o out
+	@echo "out binary is ready"
+	</pre>
+	Well, now we can compile and run the binary:
+	<pre>
+$ make arch=x86
+$ ./out
+	</pre>
+	<br>
+	We can see that, the output is "load x86 interrupts". <br>
+	Now we can compile this for riscv:
+	<pre>
+$ make riscv=x86
+$ ./out
+	</pre>
+	And we can see that the output is "load riscv interrupts". <br>
+	<br>
+	This is a very simple example of how the kernel do your isolation from hardware dependent code.
+	<br><br><br>
+	<h3>split directory</h3>
+	<table>
+	  <thead>
+	    <tr>
+	      <th>directory</th>
+	      <th>explanation</th>
+	    </tr>
+	  </thead>
+	  <tbody>
+	    <tr>
+	      <td>kernel/</td>
+	      <td>
+			Core kernel susbsystem: the code here deals with a large number of core kernel features including stuff like process/thread life cycle management, CPU task scheduling, locking, cgroups, timers, interrupts, and more.	
+		  </td>
+	    </tr>
+		<tr>
+			<td>
+				mm/
+			</td>
+			<td>
+				The bulk of the memory management (mm) code lives here. We will more about this in "Scheduling tasks: A quick overview".
+			</td>
+		</tr>
+	    <tr>
+	      <td>fs/</td>
+	      <td>
+			The code here implements two key filesystems features: The abstraction layer and the individual filesystem drivers (for example, ext[2|4], btrfs, ntfs, and mor).
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>block/</td>
+	      <td>
+			The unerlying block I/O code path to the VFS/FS. It includes the code implementing the page cache, a generic block IO layer, IO schedulers, the newish blok-mq feature, and more.	
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>net/</td>
+	      <td>
+				Complete implemention of the network protocol stack, to the letter of the Request For Comments. Includes high-quality implementations of TCP, UDP, IP, and many more networkings protocols. 	
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>ipc/</td>
+	      <td>
+				The internel process communication subsystem code; the implementation of IPC mechanisms such as SysV and POSIX message queues, shared memory, semaphores, and more. 	
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>sound/</td>
+	      <td>
+			The audio subsystem code, aka the advanced linux sound architecture layer. 	
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>virt/</td>
+	      <td>
+			 The virtualization code; the popular Kernel Virtual Machine is implemented here. 	
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>Documentation/</td>
+	      <td>
+			 The official kernel documentation resudes right here. 	
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>LICENSES/</td>
+	      <td>
+			 The next of all licenses, categorized under different heads.  	
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>arch/</td>
+	      <td>
+			 The arch-specific code lives here. Linux started as a small hobby project for the i386. It is now very probably the most ported OS ever.  	
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>certs/</td>
+	      <td>
+			 Support code for generating signed modules; this is a powerful security feature, which when correctly employed ensures that even malicious rootkits cannot simply load any kernel module they desire.  	
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>crypto/</td>
+	      <td>
+			 This directory contains the kernel-level implementation of ciphers and kernel APIs to serve consumers that require cryptographic services.  	
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>drivers/</td>
+	      <td>
+			 the kernel-level device drivers code lives here. This is considered a non-core region; it's classified into many type of drivers. This tends to be the region that's most often being contributed to; as well, this code accounts for the most disk space within the source tree.
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>include/</td>
+	      <td>
+			  This directory contains the arch-independent kernel headers. There are also some arch-specific ones under arch/&ltcpu&gt/include/....
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>init/</td>
+	      <td>
+			  The arch-independent kernel initialization code; perhaps the closest we get to kernel's "main" function is here: init/main.c:start_kernel().
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>io_uring/</td>
+	      <td>
+			  kernel infrastructure for implementing the new-ish io_uring fast I/O framework.
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>lib/</td>
+	      <td>
+			  The closest equivalent to a library for the kernel. It's important to understand that the kernel does not support shared libraries as user space apps do. Some of the code here is auto-linked into the kernel image file and hence available to the kernel at runtime.
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>rust/</td>
+	      <td>
+			  The kernel infrastructure for supporting Rust programming language live here.
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>samples/</td>
+	      <td>
+			  The kernel samples code for severals kernel features and mechanisms live here. Useful to lean from!
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>scripts/</td>
+	      <td>
+			 Several scripts live here, some of which are used during kernel build, many for other purposes like static/dynamic analysis, debuggin, and so on.  
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>security/</td>
+	      <td>
+			 Houses the kernel's Linux Security Module, a Mandatory Access Control framework that aims at imposing stricter access control of user apps to kernel space than the default kernel does.  
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>tools/</td>
+	      <td>
+			 The source code of varios user mode, tools is housed here, mostrly applications or scripts that have a "tight coupling" with the kernel, and thus require to be within the particular kernel codebase..  
+		  </td>
+	    </tr>
+	    <tr>
+	      <td>usr/</td>
+	      <td>
+			 Support code to generate and load the initramfs image.  
+		  </td>
+	    </tr>
+	  </tbody>
+	</table>
+
+	<h3> Contexts </h3>
+	As a split directory, the logic context is respected too. For example: If the fs (file system) context needs storage a value in a disk, is not responsability from file system know how write any information in the disk. The person responsible for this is the mm (manager memory). <br> 
+	So, mm must provide a API for the contexts that is interested in write in the disk. See the image: <br>
+	<img src="ex-api-call.svg"/>
+	<br>
+	A given context never invades another context.
+
+	<h2> Queues </h2>
+	Talking about queues, the kernel has your way for handle any proccess with "queues". For example, if I need write a driver for VGA text display, I need monitoring what the user has been write on your keyboard. But, I'm a driver, and I shouldn't invades the keyboard driver context.<br>
+	For this, usually the kernel do a queue for notify the interested in this notification. <br>
+	For example. We write a VGA driver, and we are interested to know what the user click on your keyboard. <br>
+	Then, the keyboard driver provides for we, a queue to we subscribe and received a notification when the user click on a keyboard key. This "queue", notify and send a value for the interested:<br>
+	<img src="queue.svg"/>
+
+	<h2>Hardware Considerations</h2>
+	Hardware-dependent code lives in separate files for each CPU architecture in arch/&ltarch&gt, for example, for x86 the files live in arch/x86/. Here live all the code that is hardware-dependent. <br>
+	Anything outside of here, is hardware-independent, with the exception of the /driver directory that is dependent device. <br>
+
+	<h2>Scheduling tasks: A quick overview</h2>
+	In some kernel, the scheduling tasks has a severals priority tasks. For example, FreeRTOS kernel for default, has 5 tasks priority, where the 0 is more priority task and 4 is the least priority. <br>
+	But in the Linux kernel, the scheduling tasks has only two priority: <br>
+	* the privilege level<br>
+	* the unprivilege level<br><br>
+	The unprivileged level is a process that the user send a system call for kernel execute a process, and the privileged process is a process that is created by a interrupt requests. The proccess EVERY have a one thread or more. If one process exists, then the one threade or more exists. The main thread is usually the main() function. A process that isn't multi-thread, have only one thread: The T0 thread or main thread.<br>
+	When the user land issuer a system call, it switches to kernel mode and execute the kernel code.<br>
+	Yes, there is no kernel or kernel thread executing code on its behalf, insteed, the thread issuing the system call, switch to kernel mode and itself executes kernel code. Think about it, the kernel every is executed within the context of a user space process or thread - we call this the proccess context. A significant portion of the kernel execute by this way, including a large portion of the code of device drivers.<br>
+	Well, how can kernel code execute? When a hardware interrupt fires, the CPU control unit stop the current task, save the current state of task and immediately run the code of the interrupt handler. Now we say that the kernel code being executed in interrupt context.<br><br>
+	So, every kernel code is executed in one of two contexts:<br>
+	<strong>Process context</strong> - When the user land thread make a system call to kernel. The kernel run the task that the thread need with kernel privileges.<br>
+	<strong>Interrupt context</strong> - When the hardware issue a interrupt request. The CPU stop the current task, save the current context and execute the interrupt handler.<br><br>
+	The image below,show us the conceptual view:<br>
+	<img src="process-threads.svg"/> <br><br>
+
+	The code of kernel have a data struct to representation a thread. When the kernel is created, the metadata of the thread is storage in this struct: task_struct. This struct can find in include/linux/shed.h.<br>
+
+	<h3>The VAS process</h3>
+	All addressable memory of the process is a BOX. This "box" then is called VAS (Virtual Address Space).<br>
+	A Important 'rule' is: LOOKING OUTSIDE THE BOX IS DISALLOWED. <br> <br>
+	
+	Features: <br>
+	* Isolation: each process has your VAS, then the process has a isolation from another process. <br>
+	* Safe: How look for outside the box is disallowed, we don't see the data of another process. <br>
+	* Performance: How the VAS is bit of memory, when the process need found any data, the memory that the process need traverse is smaller than the total memory size. <br>
+	
+	The process VAS is split into homogeneous memory regions called segments or mapping. Every linux process has at least the following mapping or segment: <br>
+	Code segment - have a executable code of program. In this memory is storage the binary of program. <br>
+	Data segment - have a value of static and global data variable. This segment is split into three distinct segments: <br>
+	<strong>__Initialized data segment</strong> - The pre-initialized global/static variables are storage here. <br>
+	<strong>__Unitialized data segment</strong> - The uninitialized global/static variables are storage here. <br>
+	<strong>__Heap segment</strong> - The memory for allocation and freeing are storage here. But this is also not entirely true, because, the memory allocation that is bigger than 128KB get their memory from a separate 'mapping' in the VAS process. <br>
+	Libraries - All libraris that a process dynamically links into are mapped into the process VAS here. <br>
+	Stack - A region of memory that uses the stack for to implement a high-level languages function-calling mechanism, and, in effect, holds the thread's execution context. Every time that the function is called, one region of this segment is allocated. In this segment is storage the local variables that is include in high-level function context, your address to call this function and your value return propagation. <br> <br>
+	
+	The image below, show us the conceptual view:<br>
+	<img src="process-vas.svg"/>
+	<br><br>
+
+	Firstly, recall that the task struct is essentially the 'root' data structure of the process of thread, then it holds all attributes of the task. This is a large data struct. How is saing by Linux Kernel Programming book, the x86_64 for 6.1 kernel have a 9,728 bytes. We will see any fields, and I put a brief explanation about this. Don't forget to go to the <a href="https://github.com/torvalds/linux/blob/9b62e02e63363f5678d5598ee7372064301587f7/include/linux/sched.h#L748">sched.h</a> file and see the task_struct struct:<br>
+	<pre>
+struct task_struct {
+	// ... 
+	char comm[TASK_COMM_LEN];       //task name
+	struct mm_struct *mm;           //this field contains a pointer to all information about the mapper of memory of process.
+	pid_t pid;                      //task PID and TGID values
+	struct files_struct *files; 	//ptr to the 'open files' ds
+	// ...
+}
+	</pre>
+	<br>
+	Now we can the mm_struct :
+	<pre>
+struct mm_struct {
+	// CODE SEGMENT
+	unsigned long start_code;  // init of code segment 
+	unsigned long end_code;    // end of code segment 
+
+	// DATA SEGMENT 
+	unsigned long start_data; // init of data segment 
+	unsigned long end_data;   // end of data segment 
+	unsigned long start_brk;  // start of heap region
+	unsigned long brk;        // end of heap region
+
+	// LIBRARIES
+	struct vm_area_struct *mmap;  // the libraries are mapped in especifics regions of VAS. Each shared librarie is loaded in yout own segment memory.
+	                              // this mmap is a linked list that represents all memory area of shared librries.
+
+	// STACK
+	unsigned long start_stack; // This field store the end of stack memory.
+}
+	</pre>
+	<br><br>
+	<img src="process-vas-threads.svg"/>
+
+
+<body>
