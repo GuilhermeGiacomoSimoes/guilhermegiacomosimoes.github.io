@@ -126,7 +126,7 @@ INT_FILE = riscv-load-int.c
 endif
 
 all:
-	CC main.c ${INT_FILE} -o out
+	${CC} main.c ${INT_FILE} -o out
 	@echo "out binary is ready"
 	</pre>
 	Well, now we can compile and run the binary:
@@ -138,7 +138,7 @@ $ ./out
 	We can see that, the output is "load x86 interrupts". <br>
 	Now we can compile this for riscv:
 	<pre>
-$ make riscv=x86
+$ make arch=riscv
 $ ./out
 	</pre>
 	And we can see that the output is "load riscv interrupts". <br>
