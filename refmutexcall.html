@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GUILHERME GIACOMO SIMOES</title>
+    <link rel="stylesheet" href="simoes.css">
+</head>
+<body>
+	<a href="index.html">⇐ index</a>
+	<h1>Refactoring of mutex calls</h1>
+	<hr>
+	<h2> The problem that needs to be solved </h2>
+	<p>
+	In the github issue, existed a discussion about call mutex for access BaseType_t type in some places of the FreeRTOS-Kernel.<br>
+	The BaseType_t on FreeRTOS-Kernel is a data type used for storage integer values and is used a lot in all the FreeRTOS. This is set to fit the size of the CPU architecture that is running FreeRTOS.<br>
+	Some files, before access the BaseType_t type, call the mutex like this:
+	<pre>
+BaseType_t ret;
+taskENTER_CRITICAL();
+{
+	ret = get_any_value();
+}
+taskEXIT_CRITICAL();
+	</pre>
+	The programmers did this for controll access for get any value and storage this in a BaseType_t variable. <br>
+	The problem with this, is because the intention of BaseType_t is be accessed through of a atomic proccess. The atomic proccess is a priority proccess in a CPU that stop any another process, store your state and execute the atomic process completely, and after return the proccess that is stoped. <br>
+	Even though the CPU has a multiple cores, all the cores is stoped for the atomic proccess to be executed.<br>
+	But, if the BaseType_t is access through a atomic context, then the taskENTER_CRITIAL is uneccessary. Right? Well, not exactly, because some CPUs don't get the BaseType_t variable with a atomic context. But knowing all the CPU architectures that execute (or not) this in atomic context is hard, especially the ones with extensions that increase the addressable memory sapce or the ones with different memory models (near, far, etc.)<br>
+	And you can ask: What the problem with the uneccessary ENTER/EXIT_critical?<br>
+	The problem is the consumption of unneccessary resources. <br>
+	So, what to do??
+	</p><br><br>
+	<h2>The proposed solution</h2>
+	<p> 
+	Instead of doing a change in a way which impacts all the CPU architecture, we can introduce this gragually on a port-by-port basis.<br>
+	How the FreeRTOS-Kernel have your hardware-dependent code splited from hardware-independent code, then we can take advantage of this decoupling.<br>
+	The portable.h file, is a interface to portmacro.h file which is a hardware-dependent. The portable.h is hardware-independent. Each portmacro.h in your architecture implements a portable.h how you can see in portable/{COMPILER}/{CPU}/portmacro.h. One example is: portable/GCC/ATMega323/portmacro.h<br>
+	So, if the portable.h is a hardware-independent file, then I can declare is this header file this macros:
+	<pre>
+#ifndef portBASE_TYPE_ENTER_CRITICAL
+    #define portBASE_TYPE_ENTER_CRITICAL() taskENTER_CRITICAL()
+#endif
+
+#ifndef portBASE_TYPE_EXIT_CRITICAL
+    #define portBASE_TYPE_EXIT_CRITICAL() taskEXIT_CRITICAL()
+#endif
+	</pre>
+	You can see that the portBASE_TYPE_ENTER_CRITICAL call the taskENTER_CRITICAL() if portBASE_TYPE_ENTER_CRITICAL is not define yet.<br>
+	So, if the CPU don't need a controll access for BaseType_t because is executed as a atomic context, the in your hardware-dependent portmacro.h can has the follow empty macros:
+	<pre>
+#define portBASE_TYPE_ENTER_CRITICAL()
+#define portBASE_TYPE_EXIT_CRITICAL()
+	</pre>
+	In this form, the taskENTER_CRITICAL is not call, because the portBASE_TYPE_ENTER_CRITICAL is already defined.<p><br><br>
+
+	<h2>How I test this change?</h2>
+	<p> 
+	For test in ATMega328p:<br>
+	First I create this FreeRTOSConfig.h<br>
+	<pre>
+#ifndef FREERTOS_CONFIG_H
+#define FREERTOS_CONFIG_H
+
+#define configUSE_PREEMPTION            1
+#define configUSE_IDLE_HOOK             0
+#define configUSE_TICK_HOOK             0
+#define configCPU_CLOCK_HZ              ( 16000000UL )
+#define configTICK_RATE_HZ              ( ( TickType_t ) 1000 )
+#define configMAX_PRIORITIES            ( 4 )
+#define configMINIMAL_STACK_SIZE        ( 85 )
+#define configTOTAL_HEAP_SIZE           ( ( size_t ) ( 1024 ) )
+#define configMAX_TASK_NAME_LEN         ( 8 )
+#define configUSE_TRACE_FACILITY        0
+#define configUSE_16_BIT_TICKS          1
+#define configIDLE_SHOULD_YIELD         1
+#define configUSE_MUTEXES               1
+#define configQUEUE_REGISTRY_SIZE       0
+#define configCHECK_FOR_STACK_OVERFLOW  0
+#define configUSE_RECURSIVE_MUTEXES     1
+#define configUSE_MALLOC_FAILED_HOOK    0
+#define configUSE_APPLICATION_TASK_TAG  0
+#define configUSE_COUNTING_SEMAPHORES   1
+#define configSUPPORT_DYNAMIC_ALLOCATION 1
+#define INCLUDE_uxTaskPriorityGet 1
+#define configUSE_TIMERS 1
+#define configTIMER_TASK_PRIORITY 1
+#define configTIMER_QUEUE_LENGTH 1
+#define configUSE_TIMERS 1
+#define configTIMER_TASK_STACK_DEPTH 1
+
+#define configUSE_PORT_OPTIMISED_TASK_SELECTION 0
+
+#define configASSERT( x ) if( ( x ) == 0 ) { taskDISABLE_INTERRUPTS(); for( ;; ); }
+
+#endif /* FREERTOS_CONFIG_H */
+	</pre>
+	Then, I create this simple Makefile:
+	<pre>
+MCU = atmega328p
+F_CPU = 16000000UL
+CC = avr-gcc
+OBJCOPY = avr-objcopy
+CFLAGS = -mmcu=$(MCU) -DF_CPU=$(F_CPU) -Wall -Os
+LDFLAGS = -mmcu=$(MCU) -lm
+
+SRC = main.c help.c FreeRTOS-Kernel/timers.c FreeRTOS-Kernel/portable/MemMang/heap_1.c FreeRTOS-Kernel/portable/GCC/ATMega323/port.c FreeRTOS-Kernel/list.c FreeRTOS-Kernel/queue.c FreeRTOS-Kernel/tasks.c
+
+TARGET = main
+
+all: $(TARGET).hex
+
+$(TARGET).elf: $(SRC)
+	$(CC) $(CFLAGS) -o $@ $(SRC)
+
+%.hex: %.elf
+	$(OBJCOPY) -O ihex -R .eeprom $&lt; $@
+
+clean:
+	rm -f *.o *.elf *.hex
+	</pre>
+	For help me with some things like print in serial port I create this help.c
+	<pre>
+#include &lt;avr/interrupt.h&gt;
+
+#include "help.h"
+#include <stdlib.h>
+#include <stdio.h>
+
+void serial_init(unsigned int ubrr) {
+    UBRR0H = (unsigned char)(ubrr &gt;&gt; 8);
+    UBRR0L = (unsigned char)ubrr;
+    UCSR0B = (1 &lt;&lt; RXEN0) | (1 &lt;&lt; TXEN0);
+    UCSR0C = (1 &lt;&lt; UCSZ01) | (1 &lt;&lt; UCSZ00);
+}
+
+static void USART_Transmit(unsigned char data) {
+    while (!(UCSR0A &amp; (1 &lt;&lt; UDRE0)));
+    UDR0 = data;
+}
+
+void serial_print(const char *str) {
+    while (*str) {
+        USART_Transmit(*str++);
+    }
+}
+
+void to_str(unsigned int from, char *to) {
+	sprintf(to, "%u", (unsigned int) from);
+}
+	</pre>
+	and this help.h
+	<pre>
+#ifndef __HELP_H__
+#define __HELP_H__
+
+void serial_init(unsigned int ubrr);
+void serial_print(const char *str);
+
+void to_str(unsigned int from, char *to);
+
+#endif
+	</pre><br>
+	for make a simple test about create a simple task, I create this main.c:
+	<pre> 
+#define __AVR_ATmega328P__
+#define F_CPU 16000000UL
+
+#include "FreeRTOS-Kernel/Arduino_FreeRTOS.h"
+#include "FreeRTOS-Kernel/include/task.h"
+
+#include "help.h"
+
+#define MYUBRR F_CPU/16/9599
+
+void vTask1(void *pvParameters);
+
+int main(void) {
+    serial_init(MYUBRR);
+
+	/// test a simple task create
+	xTaskCreate(vTask1, "task1", 128, NULL, 1, NULL);
+
+	vTaskStartScheduler();
+
+	while(1); 
+}
+
+void vTask1(void *pvParameters) {
+	serial_print("simple test about create a simple test...");
+}
+	</pre><br>
+	I compile: make and upload this for my Arduino:
+	<pre>
+avrdude -c arduino -P /dev/ttyUSB0 -b 115200 -p m328p -U flash:w:main.hex
+	</pre>
+	I use the picocom for monitoring of serial port:
+	<pre>
+picocom -b 9600 /dev/ttyUSB0
+	</pre><br>
+
+	main.c for test uxQueueMessagesWaiting() and uxQueueSpacesAvailable():
+	<pre>
+#define __AVR_ATmega328P__
+#define F_CPU 16000000UL
+
+#include &lt;avr/io.h&gt;
+#include &lt;util/delay.h&gt;
+#include &lt;stdlib.h&gt;
+
+#include "FreeRTOS-Kernel/Arduino_FreeRTOS.h"
+#include "FreeRTOS-Kernel/include/queue.h"
+
+#include "help.h"
+
+#define MYUBRR F_CPU/16/9599
+
+QueueHandle_t xQueue;
+
+int main(void) {
+    serial_init(MYUBRR);
+
+	char *str = (char*) malloc(sizeof(char));
+
+  	xQueue = xQueueCreate(10, sizeof(int));
+
+  	if (xQueue == NULL) {
+  	  serial_print("fail\n");
+  	  return 1;
+  	}
+
+  	serial_print("queue created\n");
+
+  	serial_print("messages in the queue (expected 0): ");
+	to_str(uxQueueMessagesWaiting(xQueue), str);
+  	serial_print(str);  // should print 0
+	serial_print("\n");
+
+  	int valor = 42;
+  	for (int i = 0; i &lt; 3; i++) {
+  	  xQueueSend(xQueue, &valor, 0);
+  	}
+
+  	serial_print("messeges in the queue after added 3 elements (expected 3): ");
+	to_str(uxQueueMessagesWaiting(xQueue), str);
+  	serial_print(str);  // sould print 3
+	serial_print("\n");
+
+  	int recebido;
+  	xQueueReceive(xQueue, &recebido, 0);
+
+  	serial_print("messages in the queue after remove 1 element (expected 2): ");
+	to_str(uxQueueMessagesWaiting(xQueue), str);
+  	serial_print(str);  // should print 2
+	serial_print("\n");
+
+	serial_print("uxQueueSpacesAvailable (expected 8): ");
+	to_str(uxQueueSpacesAvailable(xQueue), str);
+	serial_print(str);
+	serial_print("\n");
+
+	while(1); 
+}
+	</pre><br>
+	for test uxTaskPriorityGet() ans uxTaskBasePriorityGet();
+	<pre>
+#define __AVR_ATmega328P__
+#define F_CPU 16000000UL
+
+#include &lt;stdlib.h&gt;
+
+#include "FreeRTOS-Kernel/Arduino_FreeRTOS.h"
+#include "FreeRTOS-Kernel/include/task.h"
+
+#include "help.h"
+
+#define MYUBRR F_CPU/16/9599
+
+void vTask1(void *pvParameters);
+
+int main(void) {
+    serial_init(MYUBRR);
+
+	TaskHandle_t xHandle = NULL;
+
+	/// test a simple task create
+	xTaskCreate(vTask1, "task1", 128, NULL, 1, &xHandle);
+
+	serial_print("task priority (expected 1): ");
+	UBaseType_t res = uxTaskPriorityGet(xHandle);
+	char *str = (char*) malloc(sizeof(char));
+	to_str(res, str);
+	serial_print(str);
+	serial_print("\n");
+
+	serial_print("task base priority (expected 1): ");
+	UBaseType_t res_base = uxTaskBasePriorityGet(xHandle);
+	to_str(res_base, str);
+	serial_print(str);
+	serial_print("\n");
+
+	vTaskStartScheduler();
+}
+
+void vTask1(void *pvParameters) {
+	serial_print("simple test about create a simple test...");
+}
+	</pre><br>
+	for test xTimerGetReloadMode() and xTimerIsTimerActive()
+	<pre>
+#define __AVR_ATmega328P__
+#define F_CPU 16000000UL
+
+#include &lt;stdlib.h&gt;
+
+#include "FreeRTOS-Kernel/Arduino_FreeRTOS.h"
+#include "FreeRTOS-Kernel/include/timers.h"
+
+#include "help.h"
+
+#define MYUBRR F_CPU/16/9599
+
+TimerHandle_t periodicTimer;
+TimerHandle_t oneShotTimer;
+
+void vPeriodicTimerCallback(TimerHandle_t xTimer) {
+  serial_print("temp added\n");
+}
+
+void vOneShotTimerCallback(TimerHandle_t xTimer) {
+  serial_print("temp no periodic added\n");
+}
+
+int main(void) {
+    serial_init(MYUBRR);
+
+	periodicTimer = xTimerCreate("PeriodicTimer", pdMS_TO_TICKS(1000), pdTRUE, 0, vPeriodicTimerCallback);
+
+  	if (periodicTimer == NULL) {
+  	  serial_print("fail\n");
+  	  return 1;
+  	}
+
+  	oneShotTimer = xTimerCreate("OneShotTimer", pdMS_TO_TICKS(1000), pdFALSE, 0, vOneShotTimerCallback);
+
+  	if (oneShotTimer == NULL) {
+  	  serial_print("fail\n");
+  	  return 1;
+  	}
+
+  	xTimerStart(periodicTimer, 0);
+  	xTimerStart(oneShotTimer, 0);
+
+  	serial_print("Periodic timer recharge mode (expect - periodical): ");
+	BaseType_t periodic = xTimerGetReloadMode(periodicTimer);
+	char *str  = periodic == pdTRUE ? "periodical" : "not periodical";
+  	serial_print(str);
+  	serial_print("\n");
+
+  	serial_print("Non-periodic timer recharge mode (expect - not periodical): ");
+	BaseType_t nperiodic = xTimerGetReloadMode(oneShotTimer);
+	char *nstr = periodic == pdFALSE ? "periodical" : "not periodical";
+  	serial_print(nstr);
+	serial_print("\n");
+
+
+	char* astr = (char*) malloc(sizeof(char));
+
+	serial_print("The timer is active? (expected 0): ");
+	BaseType_t act = xTimerIsTimerActive(oneShotTimer);
+	to_str(act, astr);
+	serial_print(astr);
+	serial_print("\n");
+}
+	</pre><br><br>
+	Well, so, for test the enable and desable the ENTER_CRITICAL, I make the change of this diff:
+	<pre>
+diff --git a/portable/GCC/ATMega323/portmacro.h b/portable/GCC/ATMega323/portmacro.h
+index 6ed5e4295..131819004 100644
+--- a/portable/GCC/ATMega323/portmacro.h
++++ b/portable/GCC/ATMega323/portmacro.h
+@@ -61,6 +61,8 @@
+ #define portSTACK_TYPE           uint8_t
+ #define portBASE_TYPE            char
+
++#include "help.h" /// this is the help.h that I mentionated in the PR description
++
+ #define portPOINTER_SIZE_TYPE    uint16_t
+
+ typedef portSTACK_TYPE   StackType_t;
+@@ -78,13 +80,18 @@ typedef unsigned char    UBaseType_t;
+ #endif
+ /*-----------------------------------------------------------*/
+
++#define portBASE_TYPE_ENTER_CRITICAL()
++#define portBASE_TYPE_EXIT_CRITICAL()
++
+ /* Critical section management. */
+ #define portENTER_CRITICAL()                            \
++       serial_print("\nenter critical\n"); \
+     asm volatile ( "in      __tmp_reg__, __SREG__" ::); \
+     asm volatile ( "cli" ::);                           \
+     asm volatile ( "push    __tmp_reg__" ::)
+
+ #define portEXIT_CRITICAL()                   \
++       serial_print("\nexit critical\n"); \
+     asm volatile ( "pop     __tmp_reg__" ::); \
+     asm volatile ( "out     __SREG__, __tmp_reg__" ::)
+	</pre><br>
+	You can see that I already create the empty macro portBASE_TYPE_ENTER_CRITIAL() .... Now, when I run the tests that I mentioned in PR description , you can see where the string "enter critical" should or don't should showed.<br>
+	For ex, If you want run the test about uxQueueMessagesWaiting(), the string showing in console gonna be: "messages in the queue (expected 0):  0".<br>
+	Because, I declared the empty macros portBASE_TYPE_ENTER_CRITICAL(), then the portENTER_CRITICAL() don't is executed.<br>
+	BUT, If you comment the empty macros:
+	<pre>
+/// #define portBASE_TYPE_ENTER_CRITICAL()
+/// #define portBASE_TYPE_EXIT_CRITICAL()
+	</pre>
+	Then, the portENTER_CRITIAL() should execute .. Then in your console, you can see this:<br>
+	<pre>
+messages in the queue (expected 0): 
+enter critical
+exit critical
+0
+	</pre><br>
+	Because the prints that I set in portmacro should be executed.
+	</p><br><br>
+	<h2>Some clarifications</h2>
+	<p>
+	I didn't come up with this solution alone, I had help from the Amazon team allocated to FreeRTOS.<br>
+	I would like to thanks:<br>
+	- <a href="https://github.com/n9wxu">n9wxu</a><br>
+	- <a href="https://github.com/svenbieg">svenbieg</a><br>
+	- <a href="https://github.com/richard-damon">richard-damon</a><br>
+	- <a href="https://github.com/kar-rahul-aws">kar-rahul-aws</a><br>
+	- <a href="https://github.com/aggarg">aggarg</a><br>
+	</p><br><br>
+
+	<h2>Links</h2>
+	- <a href="https://github.com/FreeRTOS/FreeRTOS-Kernel/pull/1140">Pull Request in github</a><br>
+	- <a href="https://github.com/FreeRTOS/FreeRTOS-Kernel/issues/1059">Issue</a>
+</body>
