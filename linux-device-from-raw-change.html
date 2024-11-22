@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GUILHERME GIACOMO SIMOES</title>
+    <link rel="stylesheet" href="simoes.css">
+</head>
+<body>
+	<a href="index.html">⇐ index</a>
+	<h1>CHANGE FUNCTION from_raw() in device.rs</h1>
+	<hr>
+
+	<h2>Why the problem was should be resolved?</h2>	
+	In this <a href="https://rust-for-linux.zulipchat.com/#narrow/stream/291566-Library/topic/Inconsistency.20of.20.60from_raw.60.2E/near/450522332">discussion</a>, is suggest by Boqun Feng that the function from_raw() in <a href="https://github.com/torvalds/linux/blob/master/rust/kernel/device.rs">rust/kernel/device.rs</a> can make confusions because, the from_raw() function is the name of function in ARef kernel library and in Arc rust standard library. <br> 
+	The ARef::from_raw() and Arch::from_raw() functions don't increments the refcount, and our function in <a href="https://github.com/torvalds/linux/blob/master/rust/kernel/device.rs">rust/kernel/device.rs</a> increments the refcount. <br>
+
+	So, if any developer see this function with this semantics can get confusing, because the your first think usually can be that the Device::from_raw() don't increments the refcount.<br>
+	But, in the <a href="https://rust-for-linux.zulipchat.com/#narrow/stream/291566-Library/topic/Inconsistency.20of.20.60from_raw.60.2E/near/450522332">zulipchat</a>, the maintaners were in doubt about two questions:<br>
+	1) Should we change the Device::from_raw() function for don't increment the refcount, or.<br>
+	2) Should we change the name of Device::from_raw() function for avoid confusions.<br>
+
+	<h2>My proposed solution</h2>
+	The function Device::from_raw(), was have the follow structure:
+	<pre>
+pub unsafe fn from_raw(ptr: *mut bindings::device) -&gt ARef<Self> {
+    // SAFETY: By the safety requirements, ptr is valid.
+    // Initially increase the reference count by one to compensate for the final decrement once
+    // this newly created `ARef<Device>` instance is dropped.
+    unsafe { bindings::get_device(ptr) };
+    // CAST: `Self` is a `repr(transparent)` wrapper around `bindings::device`.
+    let ptr = ptr.cast::<Self>();
+    // SAFETY: `ptr` is valid by the safety requirements of this function. By the above call to
+    // `bindings::get_device` we also own a reference to the underlying `struct device`.
+    unsafe { ARef::from_raw(ptr::NonNull::new_unchecked(ptr)) }
+}
+	</pre><br>
+
+	The function call the "bindings::get_device(prt)". This functions is a function in a .c file. This get_device() in .c file increments the refcount of ptr.<br> 
+	After, the Device::from_raw() return the ARef::from_raw(), that return a raw pointer to ptr. <br>
+	But, in the <a href="https://github.com/torvalds/linux/blob/master/rust/kernel/device.rs">device.rs</a> have a function called as_ref() that return a point with a cast to Device trait. Is this exactly what we need. But the as_ref don't increment a refcount. For increments a refcount, we need call .into() function, like follow:
+	<pre>
+let dev = unsafe { Device::as_ref() }.into();
+	</pre>
+	So, maybe we don't need create another function for get a raw pointer for device, because is a simple comando to have in your driver... only "let dev = unsafe { Device::as_ref() }.into();"<br>
+	We are fine in removing of from_raw() function, and if the drivers developers need a reference with refcount to Device only do { Device::as_ref() }.into().<br>
+	But this generate a problem: When the developers need write this again, again and again, somebody will create a function for this in some time. <br>
+	So, I suggest rename the from_raw() function to get_device() for consistence with the get_device() in .c file, and only return { Device::as_ref() }.into(). And this is like follow:
+	<pre>
+pub unsafe fn get_device(ptr: *mut bindings::device) -&gt ARef<Self> {
+    // SAFETY: By the safety requirements ptr is valid
+    unsafe { Self::as_ref(ptr) }.into()
+}
+	</pre>
+	And this change is accepted for Greg Kroah-Hartman, and is release together of 6.12 version<br>
+	
+	<h2>How test this</h2>
+
+	of course, you need have the rust instalation in your computer, as a as bindings, and anothers tools for compile the rust code on the linux kernel.<br>
+	The documentation for able your rust code in your linux repositorie is <a href="https://docs.kernel.org/rust/quick-start.html">here</a><br><br>
+	You can create this file in sample/rust/device.rs
+	<pre>
+use kernel::device::Device;
+use kernel::prelude::*;
+use kernel::types::ARef;
+
+module! {
+    type: DeviceTest,
+    name: "device_test",
+    author: "Test device",
+    description: "A simple module for test device",
+    license: "GPL",
+}
+
+struct DeviceTest;
+
+impl kernel::Module for DeviceTest {
+    fn init(_module: &'static ThisModule) -&gt Result<Self> {
+        pr_info!("initial device test");
+        let device = create_and_get_device();
+        pr_info!("device created");
+
+        Ok(DeviceTest)
+    }
+}
+
+impl Drop for DeviceTest {
+    fn drop(&mut self) {
+        pr_info!("bye bye driver test");
+    }
+}
+
+fn create_and_get_device() -&gt ARef<Device> {
+    let device = unsafe { Device::get_device(core::ptr::null_mut()) };
+    device
+}
+	</pre>
+	<br>
+	And, I will to make available a diff for will be apply in your linux repositorie for enable this sample code in cofigurations:
+	<pre>
+diff --git a/samples/rust/Kconfig b/samples/rust/Kconfig
+index b0f74a81c8f9..c27a150b520f 100644
+--- a/samples/rust/Kconfig
++++ b/samples/rust/Kconfig
+@@ -37,4 +37,9 @@ config SAMPLE_RUST_HOSTPROGS
+ 
+ 	  If unsure, say N.
+ 
++config SAMPLE_RUST_DEVICE_TEST
++	bool "Sample rust device test"
++	help
++		this is a module for test device
++
+ endif # SAMPLES_RUST
+diff --git a/samples/rust/Makefile b/samples/rust/Makefile
+index 03086dabbea4..f1ef941d92ad 100644
+--- a/samples/rust/Makefile
++++ b/samples/rust/Makefile
+@@ -2,5 +2,6 @@
+ 
+ obj-$(CONFIG_SAMPLE_RUST_MINIMAL)		+= rust_minimal.o
+ obj-$(CONFIG_SAMPLE_RUST_PRINT)			+= rust_print.o
++obj-$(CONFIG_SAMPLE_RUST_DEVICE_TEST)			+= device.o
+ 
+ subdir-$(CONFIG_SAMPLE_RUST_HOSTPROGS)		+= hostprogs
+	</pre>
+	For apply this you can save this diff in any file and run this command:
+	<pre>
+git apply path/to/file.diff
+	</pre>
+	<br>
+	<br>
+	Now, you need able this in menu config. <br>
+	<pre>
+make LLVM=1 menuconfig
+	</pre>
+	You need browse until "Kernel hacking -&gt Sample kernel code -&gt Rust samples -&gt Sample rust device test".<br>
+	and enable all configurations that you need.<br>
+	compile the kernel:
+	<pre>
+make LLVM=1
+	</pre>
+	<br>
+	And you can install this kernel on your Pc moving the bzImage to you /boot path and creating the initramfs and updating the grub (and this can be differente for differentes linux distributions). Or you can run this in a qemu if you already have the image for initialize, like this:
+	<pre>
+qemu-system-x86_64 -kernel arch/x86_64/boot/bzImage -append "root=/dev/sda1 console=ttyS0 earlyprintk=serial" -drive file=ubuntu.qcow2,format=qcow2 -m 1024 -enable-kvm -net nic -net user,hostfwd=tcp::2222-:22 -nographic -d int,cpu_reset
+	</pre>
+	The ubuntu.qcow2 is a image which I create for test my changes in kernel linux. <br>
+	If you don't know how you can create this image, I suggest for you for search about this in anything like google, or ask about this for any IA like chatGPT. One of this options can be help you.<br>
+	When you is runing this in your machine or in qemu, you can run the 
+	<pre> dmesg </pre>
+	in terminal, and you can see the prints "initial device test" and the "device created".
+
+	<h2> Links </h2>
+	* <a href="https://lore.kernel.org/all/20241001205603.106278-1-trintaeoitogc@gmail.com/">Mailing list</a><br>
+	* <a href="https://rust-for-linux.zulipchat.com/#narrow/stream/291566-Library/topic/Inconsistency.20of.20.60from_raw.60.2E/near/450522332">Discussion on zulipchat</a><br>
+	* <a href="https://github.com/Rust-for-Linux/linux/issues/1088">Issue on github</a><br>
+</body>
+</html>
+
+
+
