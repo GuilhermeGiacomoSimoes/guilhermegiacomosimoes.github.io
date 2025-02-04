@@ -3,18 +3,22 @@ pre {
 	padding-left: 10px;
 }
 
-h1, h2, h3 {
+h1 {
+	color: #F29105;
+}
+
+h2, h3 {
 	color: #000;
 }
 
 body {
-	padding: 5px;
 	font-size: 20px;
 	color: #515151
 }
 
 .center {
-	text-align: center;
+	padding: 10%;
+	text-align: left;
 }
 
 .image-container {
@@ -56,3 +60,33 @@ th, td {
 th {
 	background-color: #f2f2f2;
 }
+
+.navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  padding: 10px 20px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+}
+
+.nav-links {
+  list-style: none;
+  display: flex;
+  gap: 20px;
+}
+
+.nav-links li a {
+  text-decoration: none;
+  color: #333;
+  font-weight: bold;
+  transition: color 0.3s ease;
+}
+
+.nav-links li a:hover {
+  color: #007bff;
+}
+
