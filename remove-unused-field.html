@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GUILHERME GIACOMO SIMOES</title>
+    <link rel="stylesheet" href="simoes.css">
+</head>
+<body>
+	  <header class="navbar">
+  	  	<nav>
+  	  	  <ul class="nav-links">
+  	  	    <li><a href="index.html">⇐ index</a></li>
+  	  	    <li><a href="linuxchanges.html">Linux</a></li>
+  	  	    <li><a href="freertoschanges.html">FreeRTOS</a></li>
+  	  	    <li><a href="posts.html">Posts</a></li>
+			<li class="right-links">
+		        <ul>
+		          <li><a href="https://github.com/guilhermegiacomosimoes">Github</a></li>
+		          <li><a href="https://www.linkedin.com/in/guilhermegiacomosimoes/">Linkedin</a></li>
+		        </ul>
+			</li>
+  	  	  </ul>
+  	  	</nav>
+  	</header>
+	<br><br><br>
+
+	<h1>PCI: cpcihp: Remove unused .get_power() and .set_power()</h1>
+	<hr>
+	<h2>Why this change should be doing</h2>
+	In the <a href="https://github.com/torvalds/linux/tree/master/drivers/pci/hotplug/cpci_hotplug.h">cpci_hotplug.h</a> the struct called `cpci_hp_controller_ops` have two fields called get_power and set_power. This two fields are a pointer for a function. <br>
+	This functions are a callback that handle the power state of PCI slots.<br><br>
+	<strong>get_power</strong><br>
+	<pre> 
+int (*get_power)(struct slot *slot)
+	</pre>
+	This check the current state of slot PCI power. Return 0 for indicate that slot is power off and return 1 for indicate that slot is power on. The negative return indicate a error when trying the get slot state.<br>
+	This usually was used for safety checking.<br><br>
+
+	<strong>set_power</strong><br>
+	<pre> 
+int (*set_power)(struct slot *slot, int value)
+	</pre>
+	This change the state of PCI slot. The slot parameter in function is a pointer to slot that will be modified, and the value parameter, obviosly is the value of a new state power (usually 0 for off and 1 for on).<br>
+	This function return 0 for success set state power and a negative value for indicate a error.<br><br><br>
+
+	The "problem" with this functions is that this is never implement for any driver. This was will created but never used. How is suggested by <a href="https://github.com/l1k">Lukas Wunner</a> and <a href="https://github.com/bjorn-helgaas">Bjorn Helgaas</a>, in this <a hfref="https://github.com/torvalds/linux/commit/a0d58937404f5fe095120687c8914175587e6c51">TODO</a> this functions never will be used and can be removed.<br>
+	By removing this function, in addition on remove a die code and improve the readability, we reduce resource consume. The pointers, in modern systems, have 4 bytes for 32 bits systems and 8 bytes for 64bits systems. In kernel developments, any chunk of memory, no matter how small, is valuable.<br><br>
+
+	<h2>My proposed solution</h2>
+	This two pointers can be removed, and in the <a href="https://github.com/torvalds/linux/tree/master/drivers/pci/hotplug/cpci_hotplug_core.c">cpci_hotplug_core.c</a> we need remove the calls of set_power() and get_power().<br>
+	The <a href="https://github.com/torvalds/linux/tree/master/drivers/pci/hotplug/cpci_hotplug_core.c">cpci_hotplug_core.c</a> call the set_power() for set a state power, but the implementation of set_power is responsability of drivers. This means that the driver developer need create a function and send to set_power or get_power a address of this function. Like this:
+	<pre>
+int my_set_power(struct slot *slot, int value) 
+{
+	// .. any code		
+}
+
+cpci_hp_controller_ops chco {
+	.set_power = my_set_power
+}
+	</pre>
+	This is almost pseudocode.<br>
+	When the <a href="https://github.com/torvalds/linux/tree/master/drivers/pci/hotplug/cpci_hotplug_core.c">cpci_hotplug_core.c</a> call the set_power (or get_power) the function that is called is the my_set_power(). But, how the any driver do not implement this, no function is called. <br>
+	In addition on this, the <a href="https://github.com/torvalds/linux/tree/master/drivers/pci/hotplug/cpci_hotplug_core.c">cpci_hotplug_core.c</a> was have a check, if the set_power (get_power) is implemented before call the function. How no driver implement this, the check is uneccessary, and we reduce more resource used (Remember that in the kernel development any resource is valuable).<br><br>
+
+	The diff of my change is:
+	<pre>
+drivers/pci/hotplug/cpci_hotplug.h      |  2 --
+drivers/pci/hotplug/cpci_hotplug_core.c | 17 ++---------------
+2 files changed, 2 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/pci/hotplug/cpci_hotplug.h b/drivers/pci/hotplug/cpci_hotplug.h
+index 03fa39ab0c88..a31d6b62f523 100644
+--- a/drivers/pci/hotplug/cpci_hotplug.h
++++ b/drivers/pci/hotplug/cpci_hotplug.h
+@@ -44,8 +44,6 @@ struct cpci_hp_controller_ops {
+ 	int (*enable_irq)(void);
+ 	int (*disable_irq)(void);
+ 	int (*check_irq)(void *dev_id);
+-	u8  (*get_power)(struct slot *slot);
+-	int (*set_power)(struct slot *slot, int value);
+ };
+ 
+ struct cpci_hp_controller {
+diff --git a/drivers/pci/hotplug/cpci_hotplug_core.c b/drivers/pci/hotplug/cpci_hotplug_core.c
+index d0559d2faf50..dd93e53ea7c2 100644
+--- a/drivers/pci/hotplug/cpci_hotplug_core.c
++++ b/drivers/pci/hotplug/cpci_hotplug_core.c
+@@ -71,13 +71,10 @@ static int
+ enable_slot(struct hotplug_slot *hotplug_slot)
+ {
+ 	struct slot *slot = to_slot(hotplug_slot);
+-	int retval = 0;
+ 
+ 	dbg("%s - physical_slot = %s", __func__, slot_name(slot));
+ 
+-	if (controller->ops->set_power)
+-		retval = controller->ops->set_power(slot, 1);
+-	return retval;
++	return 0;
+ }
+ 
+ static int
+@@ -109,12 +106,6 @@ disable_slot(struct hotplug_slot *hotplug_slot)
+ 	}
+ 	cpci_led_on(slot);
+ 
+-	if (controller->ops->set_power) {
+-		retval = controller->ops->set_power(slot, 0);
+-		if (retval)
+-			goto disable_error;
+-	}
+-
+ 	slot->adapter_status = 0;
+ 
+ 	if (slot->extracting) {
+@@ -129,11 +120,7 @@ disable_slot(struct hotplug_slot *hotplug_slot)
+ static u8
+ cpci_get_power_status(struct slot *slot)
+ {
+-	u8 power = 1;
+-
+-	if (controller->ops->get_power)
+-		power = controller->ops->get_power(slot);
+-	return power;
++	return 1;
+ }
+	</pre>
+
+	I removed the two functions and removed the calls os this functions in the hotplug core.
+
+	<h2> LINKS </h2>
+	<a href="https://github.com/torvalds/linux/commit/8ff4574cf73dba061d4a07e3b6094c5ecb2d2efe">github commit</a><br>
+	<a href="https://lore.kernel.org/all/20250217185638.398925-1-trintaeoitogc@gmail.com/">mailing list</a>
+</body>
