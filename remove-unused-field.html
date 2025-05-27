@@ -24,7 +24,7 @@
   	</header>
 	<br><br><br>
 
-	<h1>PCI: cpcihp: Remove unused .get_power() and .set_power()</h1>
+	<h1>Remove unused .get_power() and .set_power()</h1>
 	<hr>
 	<h2>Why this change should be doing</h2>
 	In the <a href="https://github.com/torvalds/linux/tree/master/drivers/pci/hotplug/cpci_hotplug.h">cpci_hotplug.h</a> the struct called `cpci_hp_controller_ops` have two fields called get_power and set_power. This two fields are a pointer for a function. <br>
@@ -43,7 +43,7 @@ int (*set_power)(struct slot *slot, int value)
 	This change the state of PCI slot. The slot parameter in function is a pointer to slot that will be modified, and the value parameter, obviosly is the value of a new state power (usually 0 for off and 1 for on).<br>
 	This function return 0 for success set state power and a negative value for indicate a error.<br><br><br>
 
-	The "problem" with this functions is that this is never implement for any driver. This was will created but never used. How is suggested by <a href="https://github.com/l1k">Lukas Wunner</a> and <a href="https://github.com/bjorn-helgaas">Bjorn Helgaas</a>, in this <a hfref="https://github.com/torvalds/linux/commit/a0d58937404f5fe095120687c8914175587e6c51">TODO</a> this functions never will be used and can be removed.<br>
+	The "problem" with this functions is that this is never implement for any driver. This was will created but never used. How is suggested by <a href="https://github.com/l1k">Lukas Wunner</a> and <a href="https://github.com/bjorn-helgaas">Bjorn Helgaas</a>, in this <a href="https://github.com/torvalds/linux/commit/a0d58937404f5fe095120687c8914175587e6c51">TODO</a> this functions never will be used and can be removed.<br>
 	By removing this function, in addition on remove a die code and improve the readability, we reduce resource consume. The pointers, in modern systems, have 4 bytes for 32 bits systems and 8 bytes for 64bits systems. In kernel developments, any chunk of memory, no matter how small, is valuable.<br><br>
 
 	<h2>My proposed solution</h2>
@@ -127,7 +127,7 @@ index d0559d2faf50..dd93e53ea7c2 100644
  }
 	</pre>
 
-	I removed the two functions and removed the calls os this functions in the hotplug core.
+	I removed the two functions and removed the calls of this functions in the hotplug core.
 
 	<h2> LINKS </h2>
 	<a href="https://github.com/torvalds/linux/commit/8ff4574cf73dba061d4a07e3b6094c5ecb2d2efe">github commit</a><br>
