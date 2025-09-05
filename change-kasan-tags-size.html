@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GUILHERME GIACOMO SIMOES</title>
+    <link rel="stylesheet" href="simoes.css">
+</head>
+<body>
+	  <header class="navbar">
+  	  	<nav>
+  	  	  <ul class="nav-links">
+  	  	    <li><a href="index.html">⇐ index</a></li>
+  	  	    <li><a href="linuxchanges.html">Linux</a></li>
+  	  	    <li><a href="freertoschanges.html">FreeRTOS</a></li>
+  	  	    <li><a href="posts.html">Posts</a></li>
+			<li class="right-links">
+		        <ul>
+		          <li><a href="https://github.com/guilhermegiacomosimoes">Github</a></li>
+		          <li><a href="https://www.linkedin.com/in/guilhermegiacomosimoes/">Linkedin</a></li>
+		        </ul>
+			</li>
+  	  	  </ul>
+  	  	</nav>
+  	</header>
+	<br><br><br>
+
+	<h1>REDUCTING SIZE OF TAGS ON LINUX KERNEL</h1>
+	<hr>
+	In the Linux Kernel development, even small changes can make difference. Recently, I contributed with a patch that is release with linux kernel 6.16, improving how tag sizes are defined in KASAN (Kernel Addres Sanitizer), one of the main tools for detection memory erros. 
+
+	<h2>What is the KASAN?</h2>
+	KASAN helps to detect the memory bugs in the kernel, such as use-after-frer and overflows. It works by assigning tags to memory allocations, so that invalid access can be intercepted.
+	<br><br>
+	KASAN have two modes of operations:<br>
+	* SW_TAGS (Software Tags): Tags are handled purely in software.<br>
+	* HW_TAGS (Hardware Tags): Tags are suported directly by the hardware (via ARM MTE - Memory Tagging Extension).<br><br>
+
+	<h2> The problem </h2>
+	Before my patch, the tag size (KASAN_TAG_WIDTH) was always degined as 8 bits, regardless of whether KASAN was running in SW_TAGS or HE_TAGS.<br>
+	However, there was a important detail:<br>
+	* In HW_TAGS mode, ARM MTE only requires 4 bits to store tags.<br>
+	* This meant the kernel was allocating more bits than necessary, wasting space in the page flags (critical fields used to store metadata about memory pages).<br><br>
+	This, reduced the flexibilit of the kernel to use those bits for another functionalities.<br><br>
+
+	<h2>The solution</h2>
+	My patch changes the definition of KASAN_TAG_WIDTH so that it better reflects the requirements of each mode:<br>
+	<pre>
+#if defined(CONFIG_KASAN_SW_TAGS)
+#define KASAN_TAG_WIDTH 8
+#elif defined(CONFIG_KASAN_HW_TAGS)
+#define KASAN_TAG_WIDTH 4
+#else
+#define KASAN_TAG_WIDTH 0
+#endif
+	</pre>
+	<br>
+	* With SW_TAGS -&gt 8 bits<br>
+	* With HW_TAGS -&gt 4 bits<br>
+	* With KASAN disabled -&gt 0<br>
+
+	<h2>Advantages</h2>
+	This change may look small, but it has pratical benefits:<br>
+	* Avoids wasting bits in `page flags`<br>
+	* Free up space for future kernel features that may need those bits.<br>
+	* Aligns the kernel more closely with the real design of ARM MTE.<br><br>
+
+	<h2>Contribution</h2>
+	This improvement was suggested by for Andrey Konovalov, who has a extensive expirence n the memory management and sanitizationi n the Linux Kernel. Receivinv his feedback and applying it helped me refine the patch and learn from someone who has contributed to Linux for a long time.<br><br>
+
+	<h2>Links</h2>
+	<a href="https://lore.kernel.org/all/20250428201409.5482-1-trintaeoitogc@gmail.com/">LKML</a>
+
+</body> 
