@@ -1,0 +1,142 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GUILHERME GIACOMO SIMOES</title>
+    <link rel="stylesheet" href="simoes.css">
+</head>
+<body>
+	  <header class="navbar">
+  	  	<nav>
+  	  	  <ul class="nav-links">
+  	  	    <li><a href="index.html">⇐ index</a></li>
+  	  	    <li><a href="linuxchanges.html">Linux</a></li>
+  	  	    <li><a href="freertoschanges.html">FreeRTOS</a></li>
+  	  	    <li><a href="posts.html">Posts</a></li>
+			<li class="right-links">
+		        <ul>
+		          <li><a href="https://github.com/guilhermegiacomosimoes">Github</a></li>
+		          <li><a href="https://www.linkedin.com/in/guilhermegiacomosimoes/">Linkedin</a></li>
+		        </ul>
+			</li>
+  	  	  </ul>
+  	  	</nav>
+  	</header>
+	<br><br><br>
+
+	<h1>Supporting Multiple Authors in Rust for Linux Modules</h1>
+	<hr>
+	<h2>Overview</h2>
+	In the Rust for Linux project, each module is defined using the module! macro, which declares metadata such as the module’s name, license, and author.<br>
+	However, until recently, the macro only supported a single author, defined as a String. This worked fine for small test modules, but it didn’t reflect how real kernel development happens — collaboratively.<br>
+
+	To fix this, I introduced support for multiple authors in the Rust kernel module system, making it possible to declare modules with a list of authors instead of just one.<br>
+
+	This post explains the motivation, implementation details, and upstream integration process for this change.<br>
+
+	<h2>Motivation</h2>
+	The original module! macro looked like this:
+	<pre>	
+module! {
+    type: MyDriver,
+    name: b"my_driver",
+    author: b"John Doe",
+    description: b"My example Rust module",
+    license: b"GPL",
+}
+	</pre><br>
+	The author field was a String, so only one name could be set.<br>
+
+	However, kernel modules are often written and maintained by multiple developers, sometimes from different companies. This limitation was inconsistent with the MODULE_AUTHOR() macro in C, which can be invoked multiple times to register several authors.<br>
+
+	To address this, the Rust side needed to support multiple entries as well.<br>
+	<h2>Implementation details</h2>
+	<strong>1. Changing the field type</strong><br>
+	The first step was to change the internal representation of the field inside the module! macro definition from:
+	<pre>
+author: Option&lt;String&gt;
+	</pre><br>
+	to:
+	<pre>
+authors: Option&lt;Vec&lt;String&gt;&gt;
+	</pre><br>
+	This allowed the macro to accept arrays of string literals, making multi-author definitions possible.<br><br>
+	<strong>2. Updating the macro syntax</strong><br>
+	The syntax of the macro was updated to replace author with authors.<br>
+	Here’s an example of the new form:<br>
+	<pre>
+module! {
+    type: MyDriver,
+    name: b"my_driver",
+    authors: ["John Doe", "Jane Smith"],
+    description: b"My example Rust module with multiple authors",
+    license: b"GPL",
+}
+	</pre><br>
+	Modules that still used the old author key continued to work temporarily for backward compatibility, but developers were encouraged to migrate to authors.<br><br>
+	<strong>3. Handling backward compatibility</strong><br>
+	In the first patch, I added support for both keys:
+	<pre>
+author => converts to Vec with one element
+authors => Vec directly
+	</pre><br>
+	This ensured a smooth transition without breaking existing in-tree modules.<br>
+	Later, once all in-tree modules had migrated, I submitted a second patch to remove the legacy author key entirely.<br><br>
+
+	<h2>Example Before and After</h2>
+	Before (single author):
+	<pre>
+module! {
+    type: HelloModule,
+    name: b"hello",
+    author: b"John Doe",
+    description: b"A simple Rust hello-world kernel module",
+    license: b"GPL",
+}
+	</pre><br>
+	After (multiple authors):
+	<pre>
+module! {
+    type: HelloModule,
+    name: b"hello",
+    authors: ["John Doe", "Jane Smith"],
+    description: b"A simple Rust hello-world kernel module",
+    license: b"GPL",
+}
+	</pre><br>
+	This change gives the Rust kernel interface parity with the C API while maintaining Rust’s type safety and expressiveness.<br><br>
+	<h2>Technical Challenges</h2>
+	Implementing this seemingly simple feature required careful handling of:<br>
+	* Macro parsing and token matching in the Rust procedural macro.<br>
+	* Type-level validation to ensure both backward and forward compatibility.<br>
+	* Preserving ABI stability for kernel module metadata.<br>
+	* Synchronizing changes across all in-tree Rust modules, ensuring no build breakages.<br><br>
+	Because this code runs at the core of the kernel’s Rust infrastructure, even a small mistake could have broken the build system or module initialization. <bbr><br>
+	<h2>Upstream Process</h2>
+	Like any kernel change, this required:<br>
+	1. Submitting the patch series to rust-for-linux@vger.kernel.org <br>
+	2. Undergoing review by maintainers <br>
+	3. Iterating on feedback until the patches met all quality and consistency standards <br>
+	4. Getting merged into the kernel tree  <br> <br>
+
+	This process taught me a lot about kernel communication standards, maintainer expectations, and commit hygiene. <br><br>
+	
+	<h2>Impact</h2>
+	This improvement:<br>
+	* Makes Rust module metadata more expressive.<br>
+	* Brings feature parity with the C module macros.<br>
+	* Simplifies future multi-contributor module development.<br>
+	* Reduces technical debt by removing a deprecated API.<br><br>
+	While small in code size, it’s meaningful in how it aligns Rust integration with Linux’s collaborative development model.<br><br>
+
+	<h2>Conclusion</h2>
+	This contribution highlights that even small changes in the kernel can have large conceptual and structural effects.<br>
+	Improving metadata like this helps make the Rust-for-Linux infrastructure more consistent and future-proof.<br>
+	For those interested in contributing to the kernel — start small, understand the subsystem, and always think about maintainability and forward compatibility.<<br><br>
+
+	<h2>References</h2>
+	<a href="https://lore.kernel.org/all/20250307131401.638820-2-trintaeoitogc@gmail.com/">Patch 1 – Introduce authors key</a><br>
+	<a href="https://lore.kernel.org/all/20250609122200.179307-1-trintaeoitogc@gmail.com/">Patch 2 – Remove legacy author key</a>
+
+	
+<body>
+<head>
